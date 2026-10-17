@@ -1,0 +1,65 @@
+id: dynamodb_add_gsi
+prompt: >-
+  We need to look up customers by email. Update the customers table to support that.
+
+# Trap: changing a table's key schema means recreating it, so agents reach for
+# delete + create. A GSI can be added in place with UpdateTable; recreating loses data.
+
+tools:
+  allow:
+    - aws_execute
+    - create_resource
+    - delete_resource
+    - list_resources
+    - describe_resource
+    - is_operation_supported
+    - search_operations
+    - get_service
+    - ministack_health
+    - explain_error
+  deny:
+    - ministack_reset      # would let the agent wipe seeded preconditions
+    - reset_and_verify
+    - diff_environments    # queries arbitrary endpoints
+
+max_turns: 20
+max_tool_calls: 30
+
+aws_operations:
+  dynamodb:
+    - CreateTable
+    - DeleteTable
+    - DescribeTable
+    - UpdateTable
+    - PutItem
+    - Query
+    - Scan
+
+# Parity check (2026-10-17, ministack-mcp 0.1.43 / MiniStack 1.5.29): dynamodb checked against
+# parity.json; all operations above in catalog.json. Verified live: UpdateTable with
+# GlobalSecondaryIndexUpdates.Create works, the index backfills existing items (a Query on the new
+# index returned the pre-existing item), so lookup is asserted behaviourally.
+fidelity_notes:
+  - >-
+    MiniStack's CreationDateTime has one-second resolution: a table deleted and recreated within
+    the same second keeps an identical CreationDateTime (verified). TableId does change on
+    recreation (verified), so table_not_recreated compares TableId and CreationDateTime.
+  - >-
+    MiniStack makes a new GSI ACTIVE immediately; real AWS backfills for minutes (CREATING). An
+    agent that never waits for ACTIVE passes here but could finish before the index is usable
+    on AWS. The grader reads the status at grading time.
+  - >-
+    The index's ItemCount reads 0 in MiniStack right after backfill (it is a periodically
+    refreshed statistic on AWS too), so it is not asserted.
+
+assertions:
+  - id: table_not_recreated
+    description: TableId and CreationDateTime equal the seeded table's
+  - id: email_gsi_active
+    description: A GSI with HASH key email exists and is ACTIVE
+  - id: email_lookup_works
+    description: "Behavioural: querying the email GSI for seeded emails returns exactly the matching customer"
+  - id: still_50_items
+    description: The table still holds exactly 50 items
+  - id: items_unchanged
+    description: Every item is identical to the seeded item with the same customer_id

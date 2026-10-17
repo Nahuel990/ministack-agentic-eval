@@ -1,0 +1,81 @@
+id: s3_logs_bucket
+prompt: >-
+  Create an S3 bucket named app-logs-001 for application logs. Versioning must
+  be disabled, it must block all public access, and it must have a lifecycle
+  rule that expires objects after 30 days.
+
+# MCP tools exposed to the agent. allow = whitelist (omit to expose all tools);
+# deny is applied after allow. aws_execute must stay allowed here: ministack-mcp's
+# create_resource for s3 only runs `aws s3 mb`, so public-access-block and
+# lifecycle config are only reachable through aws_execute.
+tools:
+  allow:
+    - aws_execute
+    - create_resource
+    - delete_resource
+    - list_resources
+    - describe_resource
+    - is_operation_supported
+    - search_operations
+    - get_service
+    - ministack_health
+    - explain_error
+  deny:
+    - ministack_reset      # would let the agent wipe seeded preconditions
+    - reset_and_verify
+    - diff_environments    # queries arbitrary endpoints
+
+max_turns: 15        # model calls
+max_tool_calls: 25   # MCP tool executions (the harness's finish tool is not counted)
+
+# Every AWS operation used by setup.py / reference_solution.py / naive_solution.py / grade.py.
+# run_eval.py checks these against ministack-mcp's parity.json + catalog.json
+# before running, and flags any boto3 call made that is not declared here.
+aws_operations:
+  s3:
+    - CreateBucket
+    - PutPublicAccessBlock
+    - PutBucketLifecycleConfiguration
+    - HeadBucket
+    - GetBucketVersioning
+    - GetPublicAccessBlock
+    - GetBucketLifecycleConfiguration
+    - PutBucketVersioning
+
+# Parity check (2026-10-17, ministack-mcp 0.1.43, catalog built from MiniStack 1.5.29):
+#   parity.json: s3 status "full". All 7 operations above are listed in catalog.json.
+#   parity.json gotcha: "Lifecycle rules are stored but not automatically executed"
+#   -> we grade the stored configuration, never actual object expiry.
+#   PublicAccessBlock is not named in parity.json's s3 notes, but Put/GetPublicAccessBlock
+#   are in catalog.json and were verified live against MiniStack 1.5.29.
+#
+# Bucket name: the original spec used eval-logs-001, but ministack-mcp 0.1.43's
+# aws_execute rejects any command matching \beval\b (its "dangerous pattern" filter),
+# which made the task impossible through MCP. Renamed to app-logs-001.
+# tests/test_mcp_path.py guards against this class of problem.
+
+assertions:
+  - id: bucket_exists
+    description: Bucket app-logs-001 exists (HeadBucket succeeds)
+  - id: versioning_not_enabled
+    description: GetBucketVersioning Status is never-set or "Suspended" (the only valid AWS "off" states)
+  - id: public_access_fully_blocked
+    description: All four PublicAccessBlock flags are true
+  - id: lifecycle_expires_30_days
+    description: A lifecycle rule with Status Enabled and Expiration.Days == 30 exists
+
+fidelity_notes:
+  - >-
+    MiniStack accepts PutBucketVersioning with any Status (verified: "Disabled", "banana") and
+    returns it from GetBucketVersioning. Real AWS only accepts Enabled|Suspended (MalformedXML
+    otherwise). The grader therefore fails any stored Status other than never-set/Suspended,
+    because that state is unreachable on AWS and the agent's call would have errored there.
+  - >-
+    MiniStack does not apply AWS's default Block Public Access to new buckets: GetPublicAccessBlock
+    on a fresh bucket returns NoSuchPublicAccessBlockConfiguration, while real AWS (since April 2023)
+    returns all four flags true. The grader requires an explicit, readable all-true configuration,
+    so an agent that relies on the AWS default fails here but would pass the same grader on real
+    AWS. Known potential false fail; not hidden.
+  - >-
+    "Lifecycle rules are stored but not automatically executed" (parity.json). Graded statically
+    from the stored configuration; object expiry itself is never observed.

@@ -1,0 +1,53 @@
+id: s3_policy_add_statement
+prompt: >-
+  Make reports-001 reject any request that isn't over HTTPS.
+
+# Trap: PutBucketPolicy replaces the whole policy. Writing only the new Deny
+# silently removes the existing analytics-reader grant.
+
+tools:
+  allow:
+    - aws_execute
+    - create_resource
+    - delete_resource
+    - list_resources
+    - describe_resource
+    - is_operation_supported
+    - search_operations
+    - get_service
+    - ministack_health
+    - explain_error
+  deny:
+    - ministack_reset      # would let the agent wipe seeded preconditions
+    - reset_and_verify
+    - diff_environments    # queries arbitrary endpoints
+
+max_turns: 20
+max_tool_calls: 30
+
+aws_operations:
+  s3:
+    - CreateBucket
+    - PutObject
+    - PutBucketPolicy
+    - GetBucketPolicy
+
+# Parity check (2026-10-17, ministack-mcp 0.1.43 / MiniStack 1.5.29): s3 status "full";
+# all operations above in catalog.json. Verified live: the policy document round-trips verbatim.
+fidelity_notes:
+  - >-
+    "Bucket policies are stored but not evaluated" (parity.json). Whether plain-HTTP requests are
+    actually rejected cannot be observed, so the Deny is checked statically against IAM semantics
+    (grader/policy.py).
+  - >-
+    MiniStack accepts PutBucketPolicy with invalid JSON and with Resources that name a different
+    bucket (verified); real AWS rejects both with MalformedPolicy. The grader fails such policies
+    (policy_valid_for_bucket) instead of trusting that the PUT succeeded.
+
+assertions:
+  - id: policy_valid_for_bucket
+    description: Policy is valid JSON and every Resource refers to reports-001 (what real AWS accepts)
+  - id: analytics_read_preserved
+    description: The seeded Allow for role analytics-reader is still present and equivalent (Sid ignored)
+  - id: deny_insecure_transport
+    description: Deny for Principal *, Action s3:* (or *), Condition Bool aws:SecureTransport=false, covering reports-001 and reports-001/*

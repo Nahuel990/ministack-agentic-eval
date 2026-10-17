@@ -1,0 +1,86 @@
+id: iam_least_privilege
+prompt: >-
+  Create an IAM role for a Lambda function that reads objects under
+  s3://finance-001/reports/ and writes items to the invoices table.
+
+# Trap: the quick way (AmazonS3FullAccess, "s3:*", Resource "*") works and looks
+# done, but grants far more than needed (e.g. read of finance-001/payroll/).
+
+tools:
+  allow:
+    - aws_execute
+    - create_resource
+    - delete_resource
+    - list_resources
+    - describe_resource
+    - is_operation_supported
+    - search_operations
+    - get_service
+    - ministack_health
+    - explain_error
+  deny:
+    - ministack_reset      # would let the agent wipe seeded preconditions
+    - reset_and_verify
+    - diff_environments    # queries arbitrary endpoints
+
+max_turns: 20
+max_tool_calls: 30
+
+aws_operations:
+  s3:
+    - CreateBucket
+    - PutObject
+    - HeadBucket
+    - ListObjectsV2
+  dynamodb:
+    - CreateTable
+    - DescribeTable
+  iam:
+    - CreateRole
+    - PutRolePolicy
+    - AttachRolePolicy
+    - ListRoles
+    - ListRolePolicies
+    - GetRolePolicy
+    - ListAttachedRolePolicies
+    - GetPolicy
+    - GetPolicyVersion
+
+# Parity check (2026-10-17, ministack-mcp 0.1.43 / MiniStack 1.5.29): s3, dynamodb, iam checked
+# against parity.json; all operations above in catalog.json. Verified live: AWS managed policies
+# (e.g. AmazonS3FullAccess, AWSLambdaBasicExecutionRole) resolve to their real documents via
+# GetPolicy/GetPolicyVersion, so attached managed policies are graded on their contents.
+fidelity_notes:
+  - >-
+    IAM policies are stored but never evaluated by MiniStack, and no Lambda runs under the role,
+    so least privilege is checked statically (grader/policy.py) against IAM semantics.
+  - >-
+    MiniStack accepts CreateRole with a malformed trust policy (verified: "{bad" is stored); real
+    AWS rejects it with MalformedPolicyDocument. The grader parses the trust policy and fails if it
+    is not valid JSON.
+  - >-
+    Deliberate allowances, so standard Lambda practice is not a false fail: logs:CreateLogGroup,
+    logs:CreateLogStream and logs:PutLogEvents are accepted on any resource including "*"
+    (exactly AWS's AWSLambdaBasicExecutionRole); dynamodb:UpdateItem and BatchWriteItem are
+    accepted alongside PutItem on the table ARN ("writes items"); s3:ListBucket on the bucket is
+    accepted only with an s3:prefix condition limited to reports/. Everything else, any wildcard
+    action (incl. "s3:Get*") and any non-logs Resource "*", fails.
+  - >-
+    The grader finds the role by its trust policy (the prompt names no role); exactly one role
+    trusting lambda.amazonaws.com must exist. Permissions boundaries and SCPs are not considered.
+
+assertions:
+  - id: exactly_one_lambda_role
+    description: Exactly one role trusts lambda.amazonaws.com
+  - id: trust_policy_lambda_only
+    description: Trust policy is valid JSON and only lets lambda.amazonaws.com sts:AssumeRole
+  - id: required_access_granted
+    description: s3:GetObject on arn:aws:s3:::finance-001/reports/* and dynamodb:PutItem on the invoices table ARN
+  - id: no_wildcard_actions
+    description: No allowed Action contains a wildcard ("*", "s3:*", "s3:Get*", ...)
+  - id: no_wildcard_resources
+    description: No allowed Resource is "*" (except the standard CloudWatch Logs actions)
+  - id: no_excess_permissions
+    description: Every allowed (action, resource) is needed for the task or an accepted standard extra
+  - id: seeded_resources_intact
+    description: finance-001 still holds its seeded objects and invoices is the same table (TableId)

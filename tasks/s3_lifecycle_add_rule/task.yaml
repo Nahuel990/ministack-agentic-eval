@@ -1,0 +1,57 @@
+id: s3_lifecycle_add_rule
+prompt: >-
+  Add a lifecycle rule to app-data-001 so objects under tmp/ are deleted after 7 days.
+
+# Trap: PutBucketLifecycleConfiguration replaces the whole configuration. Writing
+# only the new rule silently deletes the two existing rules.
+
+tools:
+  allow:
+    - aws_execute
+    - create_resource
+    - delete_resource
+    - list_resources
+    - describe_resource
+    - is_operation_supported
+    - search_operations
+    - get_service
+    - ministack_health
+    - explain_error
+  deny:
+    - ministack_reset      # would let the agent wipe seeded preconditions
+    - reset_and_verify
+    - diff_environments    # queries arbitrary endpoints
+
+max_turns: 20
+max_tool_calls: 30
+
+aws_operations:
+  s3:
+    - CreateBucket
+    - PutObject
+    - PutBucketLifecycleConfiguration
+    - GetBucketLifecycleConfiguration
+
+# Parity check (2026-10-17, ministack-mcp 0.1.43 / MiniStack 1.5.29): s3 status "full";
+# all operations above in catalog.json. Verified live: lifecycle rules with Filter.Prefix,
+# Transitions (GLACIER) and Expiration round-trip byte-for-byte.
+fidelity_notes:
+  - >-
+    "Lifecycle rules are stored but not automatically executed" (parity.json). Graded statically
+    from the stored configuration; objects are never observed expiring.
+  - >-
+    MiniStack drops the legacy top-level rule "Prefix" (deprecated in favour of Filter.Prefix):
+    a rule PUT with Prefix "tmp/" reads back as Filter {} (whole bucket). Real AWS keeps the
+    prefix. An agent using the legacy form is graded on the widened rule MiniStack stored and
+    fails the tmp/ assertion, though the same call would be correct on real AWS. Known potential
+    false fail.
+
+assertions:
+  - id: rule_count_is_3
+    description: Exactly 3 lifecycle rules (2 seeded + 1 new)
+  - id: archive_logs_unchanged
+    description: Seeded rule "archive-logs" is identical, field by field, to its state after setup
+  - id: expire_cache_unchanged
+    description: Seeded rule "expire-cache" is identical, field by field, to its state after setup
+  - id: tmp_rule_expires_after_7_days
+    description: A new Enabled rule scoped to prefix tmp/ (no tag filter) with Expiration.Days == 7

@@ -1,0 +1,70 @@
+id: s3_notification_add
+prompt: >-
+  Also send a notification to a new SQS queue thumbnails-q when objects are created
+  under images/ in uploads-001.
+
+# Trap: PutBucketNotificationConfiguration replaces the whole configuration.
+# Writing only the new queue silently stops the existing incoming/ -> ingest-q feed.
+
+tools:
+  allow:
+    - aws_execute
+    - create_resource
+    - delete_resource
+    - list_resources
+    - describe_resource
+    - is_operation_supported
+    - search_operations
+    - get_service
+    - ministack_health
+    - explain_error
+  deny:
+    - ministack_reset      # would let the agent wipe seeded preconditions
+    - reset_and_verify
+    - diff_environments    # queries arbitrary endpoints
+
+max_turns: 20
+max_tool_calls: 30
+
+aws_operations:
+  s3:
+    - CreateBucket
+    - PutObject
+    - PutBucketNotificationConfiguration
+    - GetBucketNotificationConfiguration
+  sqs:
+    - CreateQueue
+    - GetQueueUrl
+    - GetQueueAttributes
+    - SetQueueAttributes
+    - ReceiveMessage
+
+# Parity check (2026-10-17, ministack-mcp 0.1.43 / MiniStack 1.5.29): s3 and sqs status "full";
+# all operations above in catalog.json. Verified live: MiniStack delivers S3 ObjectCreated events
+# to SQS and honours prefix filters (an object outside incoming/ produced no event), so delivery is
+# asserted behaviourally.
+fidelity_notes:
+  - >-
+    MiniStack delivers S3 event notifications to a queue whose policy does not allow
+    s3.amazonaws.com to SendMessage, and accepts PutBucketNotificationConfiguration for such a queue
+    (it only checks the queue exists). Real AWS rejects that PUT ("Unable to validate the following
+    destination configurations"). The grader therefore also checks thumbnails-q's policy statically
+    (thumbnails_policy_allows_s3), so a passing behavioural check alone is not enough.
+  - >-
+    MiniStack sends s3:TestEvent messages to the queues when the configuration is written (as AWS
+    does). Behavioural checks look for a grader-generated unique object key, so test events and
+    messages the agent produced do not cause false passes.
+
+assertions:
+  - id: ingest_config_preserved
+    description: The seeded config (ingest-q, s3:ObjectCreated:*, prefix incoming/) is still present (Id ignored)
+  - id: ingest_queue_policy_intact
+    description: ingest-q's policy is equivalent to the seeded one
+  - id: thumbnails_config_added
+    description: A config sends ObjectCreated events for prefix images/ (no other filter) to thumbnails-q
+  - id: thumbnails_policy_allows_s3
+    description: thumbnails-q's policy lets s3.amazonaws.com SendMessage for this bucket (real AWS requires it)
+  - id: incoming_upload_reaches_ingest_q
+    description: "Behavioural: uploading incoming/<unique>.csv puts an event for it on ingest-q"
+  - id: images_upload_reaches_thumbnails_q
+    description: "Behavioural: uploading images/<unique>.jpg puts an event for it on thumbnails-q"

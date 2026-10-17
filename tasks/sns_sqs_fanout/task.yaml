@@ -1,0 +1,74 @@
+id: sns_sqs_fanout
+prompt: >-
+  Create SNS topic order-events and two SQS queues, billing-q and shipping-q, so every
+  message published to the topic reaches both queues.
+
+# Trap: subscribing the queues looks done, but on real AWS SNS cannot deliver to a
+# queue unless the queue policy allows it. MiniStack delivers anyway (see fidelity_notes).
+
+tools:
+  allow:
+    - aws_execute
+    - create_resource
+    - delete_resource
+    - list_resources
+    - describe_resource
+    - is_operation_supported
+    - search_operations
+    - get_service
+    - ministack_health
+    - explain_error
+  deny:
+    - ministack_reset      # would let the agent wipe seeded preconditions
+    - reset_and_verify
+    - diff_environments    # queries arbitrary endpoints
+
+max_turns: 20
+max_tool_calls: 30
+
+aws_operations:
+  sns:
+    - CreateTopic
+    - Subscribe
+    - Publish
+    - ListTopics
+    - ListSubscriptionsByTopic
+  sqs:
+    - CreateQueue
+    - GetQueueUrl
+    - GetQueueAttributes
+    - SetQueueAttributes
+    - ReceiveMessage
+
+# Parity check (2026-10-17, ministack-mcp 0.1.43 / MiniStack 1.5.29): sns and sqs status "full";
+# all operations above in catalog.json. Verified live: SQS subscriptions are auto-confirmed and
+# published messages are delivered, so delivery is asserted behaviourally.
+fidelity_notes:
+  - >-
+    MiniStack delivers SNS messages to an SQS queue that has no queue policy at all (verified).
+    Real AWS drops them unless the queue policy lets sns.amazonaws.com SendMessage. The
+    behavioural check (publish_reaches_both_queues) therefore passes for the naive solution on
+    MiniStack; the static per-queue policy assertions are what catch it.
+  - >-
+    The policy assertions require an aws:SourceArn condition equal to the topic ARN (task spec).
+    Real AWS would also deliver with a bare service-principal grant; requiring SourceArn is the
+    confused-deputy best practice, so this is stricter than "would deliver". Principal "*" /
+    {"AWS":"*"} restricted by aws:SourceArn (the older console-generated form) is accepted, since
+    AWS delivers with it.
+  - >-
+    Seeded state was added beyond the task spec (an existing inventory-events -> inventory-q
+    fan-out) so collateral damage is checked here as in the other brownfield tasks.
+
+assertions:
+  - id: resources_exist
+    description: Topic order-events and queues billing-q, shipping-q exist
+  - id: both_queues_subscribed
+    description: order-events has SQS subscriptions to both queue ARNs
+  - id: billing_policy_allows_topic
+    description: billing-q policy lets sns.amazonaws.com SendMessage with aws:SourceArn = topic ARN
+  - id: shipping_policy_allows_topic
+    description: shipping-q policy lets sns.amazonaws.com SendMessage with aws:SourceArn = topic ARN
+  - id: seeded_inventory_fanout_intact
+    description: Seeded inventory-events topic, its inventory-q subscription and queue policy are unchanged
+  - id: publish_reaches_both_queues
+    description: "Behavioural: a message published to order-events is received on billing-q and shipping-q"
