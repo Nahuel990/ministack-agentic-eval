@@ -27,8 +27,32 @@ TODO: link (YouTube, Loom or Drive, viewable by anyone with the link).
 
 ## Domain and expertise
 
-TODO (author): your background, e.g. role and years running AWS in
-production, and which tasks come from incidents or mistakes you have seen.
+Domain: cloud infrastructure operations on AWS, and testing them.
+
+I'm Nahuel Nucera, the maintainer of [MiniStack](https://ministack.org), the
+open-source AWS emulator this eval runs on. Maintaining it means
+reimplementing AWS API behaviour service by service and checking it against
+real AWS, including the details this eval depends on: which `Put*` calls
+replace a whole configuration and which merge, what AWS rejects (for example
+`Status=Disabled` for versioning), and which policies AWS needs before it will
+deliver an event. Before that I worked in QA and software engineering:
+ML/QA Engineer at G42, Senior Software Engineer at Fidelity, Test Engineer at
+DeviceAtlas and Lead QA Engineer at AID:Tech. That background shaped the
+grading approach: judge the resulting state, not the agent's report. I hold
+an MSc in Big Data Analytics and Artificial Intelligence (Atlantic
+Technological University, 2025), and I'm studying for an MSc in Quantum
+Technologies at Universidad Internacional Menéndez Pelayo (UIMP, since
+October 2026). Research: *Early Stopping in Residual Quantization* (ATU;
+TechRxiv preprint, 2025); *Fair-CTGAN*, on balancing utility, group fairness
+and individual fairness in synthetic tabular data (Zenodo, 2026); and
+*pqmesh*, a reference implementation for post-quantum key establishment
+without a coordination server (Zenodo). See
+[Google Scholar](https://scholar.google.com/citations?user=z_EHndMAAAAJ&hl=en)
+and [GitHub](https://github.com/Nahuel990).
+
+I picked the 7 tasks and their traps myself. They are ordinary change tickets
+where I know that a quick, plausible-looking solution breaks something that
+already exists.
 
 ## Why it matters
 
@@ -430,14 +454,49 @@ precondition for any `Put*` call.
 
 ## AI use
 
-TODO (author): which parts AI tools drafted (e.g. harness code, task files,
-README) and how you reviewed each task, reference solution and grading rule.
+I used Claude Code (Anthropic) as a coding assistant throughout.
+
+- **Before the challenge window (2026-10-17):** Claude Code helped write the
+  harness (`runner/`, `run_eval.py`), the grader framework (`grader/`), and
+  the task files and tests. I chose the tasks and their traps from my work on
+  MiniStack, and decided what each assertion checks.
+- **During the window (2026-10-30):** Claude Code wrote the Modal/vLLM
+  serving script (`serving/modal_vllm.py`), added `EVAL_TEMPERATURE`, updated
+  the `s3_logs_bucket` naive solution for MiniStack 1.5.35, ran the model
+  runs, and drafted most of this README, including the results tables and the
+  failure analysis.
+
+How the output was reviewed:
+
+- Every task has a reference solution that must pass and a naive solution
+  that must fail on exactly the expected assertions (`pytest -q`: 59 tests,
+  all passing on MiniStack 1.5.35). That's the grader check against both
+  right and wrong answers.
+- Each claim in the failure analysis was checked against the raw transcripts
+  in `runs/`, not against the agents' summaries.
+- Grading decisions a reviewer could dispute are listed under "Contested
+  verdicts" instead of being changed after seeing the results.
+- Fidelity gaps between MiniStack and AWS found while building the eval were
+  either fixed in MiniStack itself (I maintain it) or handled in the grader
+  and recorded in each task's `fidelity_notes`.
 
 ## Prior work
 
 **MiniStack** (the local AWS emulator) and **ministack-mcp** (the MCP server
-exposing it to agents) existed before this hackathon and are used here
-unmodified, as pinned dependencies.
+exposing it to agents) existed before this hackathon. **I am the maintainer
+of MiniStack.** This repository uses them as released dependencies:
+MiniStack from the public Docker image (`ministackorg/ministack:latest`;
+results recorded against 1.5.29 and 1.5.35) and ministack-mcp 0.1.43 from
+PyPI. Neither is modified in this repository. While building this eval, I
+fixed some MiniStack behaviours upstream so that they match AWS more closely.
+All of those fixes shipped in MiniStack 1.5.35, the public release the
+gpt-oss-120b results were recorded on. For example, 1.5.35 is the first
+version we observed rejecting `Status=Disabled` for versioning, as AWS does;
+1.5.29, used for the Nemotron run, accepted it. The graders don't rely on any
+of those fixes: where the emulator and AWS
+differ, the grader uses AWS semantics (see `fidelity_notes`), so the verdicts
+are the same on either MiniStack version. No existing benchmark or dataset
+was used. All task data is synthetic and seeded by each task's `setup.py`.
 
 Everything else in this repository was written for this hackathon, but part of
 it was written before the challenge window opened (2026-10-30). After I was
