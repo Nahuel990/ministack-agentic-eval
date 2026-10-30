@@ -66,10 +66,10 @@ assertions:
 
 fidelity_notes:
   - >-
-    MiniStack accepts PutBucketVersioning with any Status (verified: "Disabled", "banana") and
-    returns it from GetBucketVersioning. Real AWS only accepts Enabled|Suspended (MalformedXML
-    otherwise). The grader therefore fails any stored Status other than never-set/Suspended,
-    because that state is unreachable on AWS and the agent's call would have errored there.
+    MiniStack up to 1.5.29 accepted PutBucketVersioning with any Status (verified: "Disabled",
+    "banana") and returned it from GetBucketVersioning. 1.5.35 rejects it with MalformedXML, as
+    real AWS does (only Enabled|Suspended). The grader still fails any stored Status other than
+    never-set/Suspended, so the verdict is the same on either version.
   - >-
     MiniStack does not apply AWS's default Block Public Access to new buckets: GetPublicAccessBlock
     on a fresh bucket returns NoSuchPublicAccessBlockConfiguration, while real AWS (since April 2023)

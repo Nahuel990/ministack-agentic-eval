@@ -97,7 +97,9 @@ def llm_config(model: str | None) -> dict:
         raise SystemExit("No model: pass --model or set EVAL_MODEL")
     if not api_key:
         raise SystemExit("No API key: set EVAL_API_KEY (or OPENROUTER_API_KEY)")
-    return {"model": model, "base_url": os.environ.get("EVAL_BASE_URL") or DEFAULT_BASE_URL, "api_key": api_key}
+    temperature = os.environ.get("EVAL_TEMPERATURE")
+    return {"model": model, "base_url": os.environ.get("EVAL_BASE_URL") or DEFAULT_BASE_URL, "api_key": api_key,
+            "temperature": float(temperature) if temperature else None}
 
 
 def safe_name(s: str) -> str:
@@ -157,6 +159,7 @@ async def run_agent(task: Task, model: str | None = None) -> AgentResult:
                 tr.log(
                     "run_start",
                     task=task.id, model=cfg["model"], base_url=cfg["base_url"],
+                    temperature=cfg["temperature"] if cfg["temperature"] is not None else "provider_default",
                     max_turns=task.max_turns, max_tool_calls=task.max_tool_calls,
                     mcp_tools_available=sorted(t.name for t in listed),
                     mcp_tools_exposed=sorted(exposed_names),
@@ -169,7 +172,8 @@ async def run_agent(task: Task, model: str | None = None) -> AgentResult:
                     while turns < task.max_turns:
                         turns += 1
                         t0 = time.monotonic()
-                        resp = client.chat.completions.create(model=cfg["model"], messages=messages, tools=tools)
+                        extra = {} if cfg["temperature"] is None else {"temperature": cfg["temperature"]}
+                        resp = client.chat.completions.create(model=cfg["model"], messages=messages, tools=tools, **extra)
                         if not resp.choices:
                             raise RuntimeError(f"empty response: {resp.model_dump()}")
                         msg = resp.choices[0].message
