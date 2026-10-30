@@ -206,6 +206,10 @@ python run_eval.py --task s3_logs_bucket --model nvidia/nemotron-3-super-120b-a1
 # Full suite, 3 independent trials per task (pass rate per task per model)
 python run_eval.py --model <model> --trials 3
 
+# Claude, through Anthropic's OpenAI-compatible endpoint (no code changes needed)
+EVAL_BASE_URL=https://api.anthropic.com/v1/ EVAL_API_KEY=$ANTHROPIC_API_KEY EVAL_TEMPERATURE=1.0 \
+  python run_eval.py --model claude-haiku-4-5-20251001 --trials 1
+
 # Tests (these reset MiniStack and refuse to run if MINISTACK_ENDPOINT_URL is unset)
 pytest -q
 ```
