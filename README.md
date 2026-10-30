@@ -16,10 +16,13 @@ an experienced engineer knows about: many AWS `Put*` APIs replace the whole
 configuration instead of merging into it. Key finding: `openai/gpt-oss-120b`
 (3 trials per task) passed 9 of 21 runs but claimed success in 20. That means
 11 of 21 runs were false successes: the agent said "done", but the
-infrastructure was broken. On the tasks where a write replaces existing
-configuration, the result came down to one habit. The 2 runs that read the
-existing configuration before writing passed. The 7 that didn't read first all
-failed, even though each of them read the configuration back afterwards.
+infrastructure was broken. Claude Haiku 4.5 (1 trial per task) passed 2 of 7,
+and all 5 of its failures were false successes. On the tasks where a write
+replaces existing configuration, the result came down to one habit. In
+gpt-oss's runs, the 2 that read the existing configuration before writing
+passed, and the 7 that didn't read first all failed, even though each of them
+read the configuration back afterwards. Haiku never read first on those tasks,
+and failed all three.
 
 ## Video walkthrough
 
@@ -296,10 +299,12 @@ ministack-mcp 0.1.43 and a fresh MiniStack reset before each run.
 | model | served via | run date | MiniStack | settings | graded runs | pass rate | pass@3 | pass^3 | false success | cost |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `openai/gpt-oss-120b` (rev `b5c939de`) | self-hosted, vLLM 0.32.0 on 1× H100 (Modal) | 2026-10-30 | 1.5.35 | temperature 1.0; 3 trials/task; 15–20 model calls, 25–30 tool calls max | 21/21 | **9/21 (43%)** | 5/7 | 1/7 | **11/21 (52%)** | ~$0.72 (Modal credits) |
+| `claude-haiku-4-5-20251001` | Anthropic API (OpenAI-compatible endpoint) | 2026-10-30 | 1.5.35 | temperature 1.0; **1 trial/task** (budget) | 7/7 | **2/7 (29%)** | n/a | n/a | **5/7 (71%)** | $0.16 |
 | `nvidia/nemotron-3-super-120b-a12b:free` | OpenRouter free tier | 2026-10-17 | 1.5.29 | provider default temperature; 3 trials/task planned | 3/21 | 1/3 | n/a | n/a | 2/3 | $0 |
 
 pass@3 is the number of tasks solved in at least 1 of 3 trials. pass^3 is the
-number solved in all 3. The Nemotron run stopped at the free tier's daily
+number solved in all 3. Claude Haiku 4.5 got 1 trial per task, because the API credit
+available was $0.35. The Nemotron run stopped at the free tier's daily
 request limit (3 runs graded, 2 provider errors, 16 not run), so it is reported
 only as a second, small observation.
 
@@ -417,6 +422,26 @@ grader after seeing the results:
   count leaving a fake record in a production customer table as a failure,
   because we think a reviewer would reject that change.
 
+**Claude Haiku 4.5 (1 trial per task, 2026-10-30): 2/7 passed, 5/7 false
+success.** It passed `dynamodb_add_gsi` and `s3_logs_bucket`. It failed the
+same way gpt-oss did:
+- In [lifecycle](runs/s3_lifecycle_add_rule/claude-haiku-4-5-20251001/20261030T133536Z.jsonl),
+  [policy](runs/s3_policy_add_statement/claude-haiku-4-5-20251001/20261030T133629Z.jsonl)
+  and [notification](runs/s3_notification_add/claude-haiku-4-5-20251001/20261030T133600Z.jsonl),
+  it never read the existing configuration before writing, and it replaced it
+  all 3 times. That matches the read-before-write pattern: it read first 0
+  times and passed 0 times.
+- In the notification run, it tested its change by uploading a file and
+  receiving the event. That only worked because MiniStack delivers without a
+  queue policy. On AWS, the notification would have been rejected, and the
+  existing `ingest-q` feed was gone either way.
+- [IAM](runs/iam_least_privilege/claude-haiku-4-5-20251001/20261030T133521Z.jsonl):
+  the same unscoped `s3:ListBucket` on `finance-001` as the other models.
+- [SNS→SQS](runs/sns_sqs_fanout/claude-haiku-4-5-20251001/20261030T133638Z.jsonl):
+  subscriptions created, but no queue policy, so AWS would drop every
+  message. It claimed "all messages ... are delivered to both queues"
+  without publishing a single test message.
+
 **Nemotron 3 Super (free, 2026-10-17, 3 graded runs).** It showed the same
 patterns. In `s3_lifecycle_add_rule`
 ([transcript](runs/s3_lifecycle_add_rule/nvidia_nemotron-3-super-120b-a12b_free/20261017T195044Z.jsonl)),
@@ -440,11 +465,19 @@ precondition for any `Put*` call.
 
 ## Limitations
 
-- Only open-weight models, because the budget was $0 out of pocket (Modal
-  credits plus OpenRouter's free tier). No closed frontier model (Claude, GPT,
-  Gemini) was tested, so we don't claim these rates hold for them. The harness
-  works with any OpenAI-compatible endpoint (`EVAL_BASE_URL`), so testing one
-  only needs a key.
+- The budget was $0 out of pocket (Modal credits, OpenRouter's free tier and
+  $0.35 of existing Anthropic API credit). The only closed model is Claude
+  Haiku 4.5, a small model, with 1 trial per task. No frontier-scale closed
+  model (Claude Opus or Sonnet, GPT, Gemini) was tested, so we don't claim
+  these rates hold for them. The harness works with any OpenAI-compatible
+  endpoint (`EVAL_BASE_URL`), so testing one only needs a key.
+- Run hygiene: only one MiniStack may listen on the endpoint the agent knows.
+  Agents sometimes pass `--endpoint-url http://localhost:4566` themselves, and
+  `aws_execute` honours it. An early Haiku attempt, run while a second, older
+  MiniStack was on 4566 and the eval used 4567, read the wrong emulator. That
+  run was discarded (it is not in `runs/`), and the reported Haiku run used a
+  single MiniStack on 4566. No gpt-oss run sent a command to the wrong
+  endpoint (checked in all 21 transcripts).
 - Only gpt-oss-120b has a complete 3-trial run. With n=3 per task, per-task
   rates are coarse. The Nemotron run is a partial run (3 graded runs) on an
   older MiniStack.
