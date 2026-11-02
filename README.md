@@ -26,7 +26,9 @@ and failed all three.
 
 ## Video walkthrough
 
-TODO: link (YouTube, Loom or Drive, viewable by anyone with the link).
+https://www.youtube.com/watch?v=zBGEElk1iGA (4 min 19 s). It covers the
+problem, how a task is graded, the results, two real failure transcripts and
+the takeaway. Narration is an AI voice (Piper, public-domain LJSpeech model).
 
 ## Domain and expertise
 
